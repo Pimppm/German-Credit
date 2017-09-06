@@ -1,0 +1,711 @@
+-------------------------------------------------------------------------------------
+German Credit Data
+Pimjan Barwick
+-------------------------------------------------------------------------------------
+
+#Exploratory Data Analysis
+Load the require packages
+```{r, include=FALSE}
+library(ggplot2)
+library(reshape2)
+library(plyr)
+library(knitr)
+library(dplyr)
+library(ROCR)
+library(pROC)
+library(epitools)
+library(vcd)
+library(MASS)
+library(descr)
+library(corrplot)
+library(e1071)
+library(QuantPsyc)
+library(InformationValue)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+Read in data
+```{r, include=FALSE}
+data <- read.csv("credit_card.csv", head=T, sep=",")
+attach(data) #attach the column names, then it can be directly call
+```
+
+Let's look at the structure.
+```{r}
+str(data)
+```
+The data has 1,000 observations of 21 variables; independence variables and dependence variable. Looking at the structure of the data, we see that the variable Location, Num_dependent, Residence_since,and Existing_credit are integers. These should be classified as categorial variables. Let's use an R factor function to convert these to categorial variables.
+
+Convert variables
+```{r}
+data$Location <- as.factor(Location)
+data$Existing_credit <- as.factor(Existing_credit)
+data$Num_dependent <- as.factor(Num_dependent)
+data$Residence_since <- as.factor(Residence_since)
+data$credibility <- as.numeric(ifelse(Class=="bad",1,0)) #recoding Class into 1,0 and record into a new column
+```
+
+```{r}
+#data for the randomforests use
+rf.data <- data[,-22]
+```
+
+Examination for missing values
+```{r}
+sum(is.na(data))
+```
+There is no sign of missing values. This is a good sign.
+
+Now, let's take a look at the potential classes of the response variable to see how many people can be actually classied as having either bad and good credit.
+```{r}
+table(Class) #Total number of classes in reponse variable
+prop.table(table(Class))*100 #percent of Classes
+```
+In the the sample which has a size of 1000, there are 300 people, of these about 30% classified as having bad credit and 700 people about 70% classified as good credit. This classification is based on the Bank's opinion of the actual applicants.
+
+Both categorical and continuous variables are included in the data set. First, let's take a look at the  continuous variables, since there are only a couple of them.
+
+#Distribution of the continuous variables
+First, let's look at summaries;
+```{r}
+summary(Credit_usage) #Credit Usage Summary
+summary(Current_balance) #Current Balance Summary
+summary(cc_age) #Age Summary
+```
+The range between Max and Min are very high for all three varibles, this could be a potential sign of skewness. To make a better detemination of this we will plot the distribution graph.
+
+#Age distribution 
+The age distribution below shows that the majority of loan applicants are young, whose average age is approximately 25-26. The older the age, the less likely a person is to apply for a credit loan.
+```{r}
+ggplot(data=data, aes(x=cc_age, fill=factor(credibility))) +
+  geom_bar() + labs(x='Years') +
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad"))
+```
+
+Moreover, the graph demonstrates a couple of outlier applications by age these loan applicants have age of more than 70. Let's take an inside look at these potential loans.
+```{r}
+subset(data, cc_age>70)
+```
+These people typically were self employed, if not they had own real estate, the purpose of applied for loans were to buy cars and business.These loans purposes make sense as people at this level might want a car for travelling and/or more money in their businesses. Of the applicants only one is classified as bad credit. The only outstnading characeristic here appears to be the existing payment plan, all of the other metrics appear to be the same as other good credit candidates.    
+
+Let's transform age data to attempt to remove the skewness previously observed to see how it looks.
+```{r}
+p_1 <- qplot(log(cc_age), data=data, geom="histogram",binwidth=0.30)
+#histogram by group
+p_2 <- qplot(log(cc_age), data=data, geom="histogram",binwidth=0.30, fill=factor(credibility)) +
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad"))
+
+source("multiplot.R")
+multiplot(p_1,p_2)
+```
+
+Eventhough I have transformed the data, the graph still shows the skewness. Data transformation does not seem to help improve the interpretability or appearance of age variable.
+
+#Credit Usage and Current Balance distributions
+```{r}
+par(mfrow=c(1,2))
+hist(Credit_usage, xlab = "Month", main="Credit Usage")
+hist(Current_balance,xlab = "Balance", main="Current Balance")
+```
+
+As we can see, these continuous variables show positive skewness. In a further view let's create box plot with these variables.
+```{r}
+par(mfrow=c(2,2))
+boxplot(Credit_usage, xlab = "Credit Usage(month)",
+        range=1.5)
+boxplot(Current_balance, xlab = "Current Balance")
+boxplot(cc_age, xlab = "Age(years)")
+```
+
+The plots help to show the outliers.To deal with outliers I should transform these variables, I do this by attempting to pull the outlying data from a positively skewed distribution closer to the bulk of the data in a effort to have the variable be normally distributed. 
+
+#Transform (Log)- Current Balance
+
+```{r}
+#Overall histogram
+p1 <- qplot(log(Current_balance), data=data, geom="histogram",binwidth=0.30)
+#histogram by group
+p2 <- qplot(log(Current_balance), data=data, geom="histogram",binwidth=0.30, fill=factor(credibility)) +
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad"))
+
+source("multiplot.R")
+multiplot(p1,p2)
+```
+
+In graphs, I saw how taking a log-transformation of the variable brought the outlying data points from the right tail towards the rest of the data.When I am looking across the histogram, I can see this log(Current_balace) plot has about three peaks.Looking at the separation of loaners who classified as bad compared to loaners who classified as good. I see there really is no difference in the shape of the distributions between good and bad credit when looking at teh distributions of the loan balances.  Obviously there are less bad the good credit applicants but the likelihodd doesnt appear to changes with the current balance.
+
+#Transform (Log)- Credict Usage
+```{r}
+#Overall histogram
+p3 <- qplot(log(Credit_usage), data=data, geom="histogram",binwidth=0.30)
+#histogram by group
+p4 <- qplot(log(Credit_usage), data=data,geom="histogram",binwidth=0.30, fill=factor(credibility))+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) 
+
+source("multiplot.R")
+multiplot(p3,p4)
+```
+
+
+Let's check correlation of numeric predictors;
+```{r}
+numeric.var.cor <- cor(data[,c("Credit_usage","Current_balance","cc_age")])
+corrplot(numeric.var.cor, method="number")
+```
+
+There is correlation between independent variable Current_balance and Credit_usage, the r = 0.62. 
+
+Current_balace vs Credit_usage scatter plots
+```{r}
+ggplot(data=data,aes(x=log(Current_balance), y=log(Credit_usage), color=factor(credibility))) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad"))
+```
+
+From this test I saw that there are positive relationships in the two groups (good and bad) between two variable, Current_balance and Credit_usage. This suggests that many times as an applicants checking account balance increases the amount of credit used also increases.
+
+Let's determine which variable we should drop or which one we should keep.
+```{r}
+#Independent t-test for two samples testing it in two group good and bad
+t.test(Credit_usage ~ Class)
+t.test(Current_balance ~ Class)
+```
+
+Use Logistic Regression to determine which variable has more power of prediction.
+```{r}
+#Current_balance
+currentB.glm <- glm(Class ~ Current_balance, family="binomial", data)
+summary(currentB.glm)
+
+#Credit_usage
+currentB.glm <- glm(Class ~ Credit_usage, family="binomial", data)
+summary(currentB.glm)
+```
+
+Current_balance will be removed from our model, since Credit_usage has a better representeed t-value and also p-value.Now move on to categorical variables, let's look at the proportions for categorical variables.
+
+#Distribution of the categorical variables 
+I compared the Purposes of the oan applications, looking at how their distribution differs for the two classes. 
+```{r}
+p5 <- ggplot(data=data, aes(x=Purpose, fill=factor(credibility))) +
+  geom_bar() +
+  labs(x='Purpose', y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=11, angle=40), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Purpose")
+
+#class bad rate
+class_purpose <- data %>% 
+                    group_by(Purpose) %>% 
+                    summarise(class_rate = mean(credibility))
+p6 <- ggplot(data = class_purpose, aes(x=Purpose, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Purpose)) +
+  theme(axis.text.x = element_text(size=11, angle=40), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p5,p6)
+```
+
+The major purposes of loan applicants are to buy radio/tv, new car, and furniture/equipment.Eventhough, the radio/tv purpose has a higher number of applications than the new car purpose, it has a lower number of applications classified as bad compared to total applications for new cars. When looking at specifically the different classifications for bad rate, the graph shows us education has highest classication as bad rate, the next Other, and new car is the third classification.
+
+Let's take a look at Credit_history variable.
+```{r}
+p7 <- ggplot(data=data, aes(x=Credit_history, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=11, angle=60), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Credit History")
+
+#class bad rate
+class_CreditHistory <- data %>% 
+                    group_by(Credit_history) %>% 
+                    summarise(class_rate = mean(credibility))
+p8 <- ggplot(data = class_CreditHistory, aes(x=Credit_history, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Credit_history)) +
+  theme(axis.text.x = element_text(size=11, angle=60), axis.title.x=element_blank(),
+        legend.position="none") + 
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p7,p8)
+```
+
+Graph shows that the category of no credits/ all paid has highest class bad rate, followed by all paid. It is interesting the critical/other existing credit category in credit hisory has lowest class bad rate.
+
+Also of note is the checking account balance, most loaners had no checking account with the bank. Some of loaners had balance less than 200 DM.
+```{r}
+p9 <- ggplot(data=data, aes(x=Checking_Acct_Balance, fill=factor(credibility))) +
+  geom_bar() +
+  labs(x='Checking Account Balance', y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=9, angle=45), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Checking Account Balance")
+
+#class bad rate
+class_CkeckAcct <- data %>% 
+                    group_by(Checking_Acct_Balance) %>% 
+                    summarise(class_rate = mean(credibility))
+p10 <- ggplot(data = class_CkeckAcct, aes(x=Checking_Acct_Balance, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Checking_Acct_Balance)) +
+  theme(axis.text.x = element_text(size=10, angle=45), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p9,p10)
+```
+
+Look at Avg_credit_balance variable. Most of loaners had average credit balance less than 100.
+```{r}
+p11 <- ggplot(data=data, aes(x=Avg_credit_balance, fill=factor(credibility))) +
+  geom_bar() +
+  labs(x='Average Credit Balance', y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=9, angle=45), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Average Credit Balance")
+
+#class bad rate
+class_AvgCredit <- data %>% 
+                    group_by(Avg_credit_balance) %>% 
+                    summarise(class_rate = mean(credibility))
+p12 <- ggplot(data = class_AvgCredit, aes(x=Avg_credit_balance, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Avg_credit_balance)) +
+  theme(axis.text.x = element_text(size=10, angle=45), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p11,p12)
+```
+
+```{r}
+p13 <- ggplot(data=data, aes(x=Property_magnitude, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Property Magnitude")
+
+#class bad rate
+class_PropMag <- data %>% 
+                    group_by(Property_magnitude) %>% 
+                    summarise(class_rate = mean(credibility))
+p14 <- ggplot(data = class_PropMag, aes(x=Property_magnitude, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Property_magnitude)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p13,p14)
+```
+
+Other payment plans, about 81% of applicants have no other payment plan. Some people had plans to pay back a loan with a bank account and store.  When there is a payment plan in bank and store payment plans it significantly increases the  likelihood of a bad classification .
+```{r}
+p15 <- ggplot(data=data, aes(x=Other_payment_plans, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Other Payment Plans")
+
+#class bad rate
+class_otherplan <- data %>% 
+                    group_by(Other_payment_plans) %>% 
+                    summarise(class_rate = mean(credibility))
+p16 <- ggplot(data = class_otherplan, aes(x=Other_payment_plans, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Other_payment_plans)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p15,p16)
+```
+
+Next we looked at whether being highly Qualified/self-employed, unskilled resident (does that mean the rest are not residents?) influences the classification. This gives more insight into the data set I'm working on.  It is little bit odd and I may have to be careful with how I'm looking at our results.
+```{r}
+#required(grid)
+p17 <- ggplot(data=data, aes(x=Job, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Job")
+
+#class bad rate
+class_job <- data %>% 
+                    group_by(Job) %>% 
+                    summarise(class_rate = mean(credibility))
+p18 <- ggplot(data = class_job, aes(x=Job, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Job)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p17,p18)
+```
+
+The most of this data set consists of foreigners--which is very interesting indeed. This tells us it might be a foreign bank or service that is providing credit to immigrants perhaps?
+
+```{r}
+#required(grid)
+p19 <- ggplot(data=data, aes(x=Foreign_worker, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Foreign Worker")
+
+#class bad rate
+class_worker <- data %>% 
+                    group_by(Foreign_worker) %>% 
+                    summarise(class_rate = mean(credibility))
+p20<- ggplot(data = class_worker, aes(x=Foreign_worker, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Foreign_worker)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p19,p20)
+```
+
+When analyzing the data around telephone ownership it suggests that owning a phone has not real predictive power over whether or not a person will have good of bad credit quality. The graph supports this through a realtively even amount when comparing good vs bad applicant percentage whether the applicant owns a phone or not.It is interesting they still track this data which in the past was probably significant but is no longer so due to the change phone markets. 
+
+```{r}
+#required(grid)
+p21 <- ggplot(data=data, aes(x=Own_telephone, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Own Telephone")
+
+#class bad rate
+class_worker <- data %>% 
+                    group_by(Own_telephone) %>% 
+                    summarise(class_rate = mean(credibility))
+p22 <- ggplot(data = class_worker, aes(x=Own_telephone, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Own_telephone)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p21,p22)
+```
+
+
+From the graph below it suggests there is no difference in the percentage of people with bad credit basedon how many dependents they have. The low number of dependents could possibly indicate selective sampling especially since 96% are listed as foreign workers.  
+
+```{r}
+#required(grid)
+p23 <- ggplot(data=data, aes(x=Num_dependent, fill=factor(credibility))) +
+  geom_bar() + labs(y= 'Total no. of loan applicants') +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank())+
+  scale_fill_discrete(name="credibility", labels=c("Good", "Bad")) +
+  ggtitle("Number of Dependent")
+
+#class bad rate
+class_dependent <- data %>% 
+                    group_by(Num_dependent) %>% 
+                    summarise(class_rate = mean(credibility))
+p24 <- ggplot(data = class_dependent, aes(x=Num_dependent, y = class_rate - 0)) +
+  geom_bar(stat = "identity", aes(fill=Num_dependent)) +
+  theme(axis.text.x = element_text(size=10, angle=30), axis.title.x=element_blank(),
+        legend.position="none") +
+  ggtitle("Classification of BAD rate")
+
+source("multiplot.R")
+multiplot(p23,p24)
+```
+
+#Build a Logistic Regression
+
+1,000 observations are randomly partitioned into two subsets - Train and Test data. Split data into Training 60%  and Test 40%
+
+```{r}
+#Partitioning data into train and test sets
+set.seed(12345)
+sample <- createDataPartition(y=data$credibility,p=0.60, list=FALSE)
+train_data  <- data[sample,]
+test_data <- data[-sample,]
+```
+
+#Model 1 - Logistic Regression included all variables
+H0: There is no relationship between the X variables and the Y variable.*
+H1: There is relationship between the X variables and the Y variable.
+(*The Y values we predict from your multiple logistic regression equation are no closer to the actual Y values than we would expect by chance.)
+
+Multiple logistic regression assumes that the observations are independent. We have assumed We have a sample of independent observations, meaning the value of one observation does not affect the value of other observations. 
+
+First used Logistic Regression to determine the effect of a set of variables (a model) on the probability of an event occurring.We included all variables in the model.The logistic model is fit to the Train set. 
+```{r}
+# with all significant variables
+glm.model <- glm(credibility ~ log(Credit_usage) + cc_age + Checking_Acct_Balance + Credit_history + Purpose +  Avg_credit_balance + Employment + Location + Personal_status + Other_parties + Residence_since + Property_magnitude +  Other_payment_plans + Housing + Existing_credit + Foreign_worker+ Num_dependent + Job + Own_telephone, family="binomial", data=train_data)
+summary(glm.model)
+```
+
+Credit usage and Checking_Acct_Balance are the most important varibles in the model. 
+
+Analysis of Deviance Table
+```{r}
+anova(glm.model, test="Chisq")
+```
+Only some of variables effect the model. The next step was to run stepwise logistic regression to select the variables for the model.
+
+# Model 2 - Logistic regression - Stepwise 
+Run stepwise regression using AIC method in selecting the input variables.
+```{r, include=FALSE}
+#Stepwise Regression use AIC method
+stepwise.model <- stepAIC(glm.model, direction="both", data=train_data)
+```
+
+```{r}
+stepwise.model$anova
+```
+
+After running the stepwise logistic regression, the final input variables were:
+
+Creditability ~ log(Credit_usage) + Checking_Acct_Balance + Credit_history + 
+    Purpose + Avg_credit_balance + Employment + Location + Other_parties + 
+    Residence_since + Property_magnitude + Other_payment_plans + 
+    Housing + Foreign_worker
+
+These variables gave us the lowest AIC, meaning it was the best fit in the losgistic regression.
+
+Looking at their coefficients
+```{r}
+summary(stepwise.model)
+```
+
+Analysis of Deviance Table
+```{r}
+anova(stepwise.model, test="Chisq")
+```
+
+However, when look at the effect of the model or p-value I saw a couple of variables are no effect to the model - p-value more than 0.05. It means the coefficient are no different than 0. I will remove these variables from this model, but now let's evaluate this model.
+
+#Residual Plot
+Let's plot residual to determine whether the residuals are consistent with random error.
+```{r}
+model.res <- residuals(stepwise.model, type = "deviance")
+```
+
+Plot the deviance residuals.
+```{r}
+plot(model.res, main="Plot of Deviance Residuals", ylab="Residuals")
+abline(0,0)
+```
+
+The deviance residuals plot shows a random pattern, indicating a good fit for a model.
+
+#Predicting Class/ Credibility
+```{r}
+#for train data
+train_data$pred <- predict(stepwise.model, newdata=train_data, type="response")
+head(train_data$pred)
+```
+
+```{r}
+#for test data
+test_data$pred <- predict(stepwise.model, newdata=test_data, type="response")
+head(test_data$pred)
+```
+
+Plotting distribution of prediction score grouped by khown outcome
+```{r}
+ggplot(train_data, aes(x=pred, color=Class, linetype=Class)) +
+  geom_density()
+```
+
+The score distributions of the positive and negative instances aren't well separated, we can't pick an appropriate threshold in the "valley" between the two peaks. 
+
+
+#Cutoff Point
+```{r}
+preds <- prediction(test_data$pred, test_data$credibility)
+```
+
+```{r}
+model.eval <- performance(preds, "acc")
+plot(model.eval)
+abline(h=0.75, v=0.7437, col="red")
+```
+
+Identify the best values
+```{r}
+max <- which.max(slot(model.eval, "y.values")[[1]])
+max
+```
+
+```{r}
+acc <- slot(model.eval, "y.values")[[1]][max]
+cut <- slot(model.eval, "x.values")[[1]][max]
+print(c(Accuracy=acc, Cutoff=cut))
+```
+The model correctly predicts 75% of the cases.
+
+#Plot the ROC curve and calculate the AUC
+```{r}
+model.roc <- performance(preds, "tpr","fpr")
+plot(model.roc,
+     colorize=T,
+     main="ROC Curve",
+     ylab="Sensitivity",
+     xlab="1-Specificity")
+abline(a=0,b=1)
+
+#AUC
+auc <- performance(preds,"auc")
+model.auc <- unlist(slot(auc,"y.values"))
+model.auc <- round(model.auc,4)
+legend(0.6,0.5, model.auc, title="AUC")
+```
+
+The AUC is 73.74%. It has moderate discriminating power.
+
+#Confusionmatrix - Sensitivity, and Specificity
+```{r}
+test_data$predicted <- ifelse(test_data$pred >= cut,"1","0")
+head(test_data$predicted)
+```
+
+```{r} 
+confusionMatrix(test_data$credibility, test_data$predicted, positive="1")
+```
+
+A probability 50% for classification of credibility.
+```{r}
+test_data$predicted50 <- ifelse(test_data$pred >= 0.5,"1","0")
+confusionMatrix(test_data$credibility, test_data$predicted50, positive="1")
+```
+
+Therefore, the model perform better than 50% chance.
+
+```{r}
+model.eval <- performance(preds, "acc")
+plot(model.eval)
+abline(h=0.75, v=0.7437, col="red")
+abline(h=0.74, v=0.50, col="blue")
+```
+
+
+#Model3 - remove no effect variables from stepwise regression
+```{r}
+fitted.model <- glm(formula = credibility ~ log(Credit_usage) + Checking_Acct_Balance + 
+    Credit_history + Purpose + Avg_credit_balance + Employment + Residence_since, family = "binomial", 
+    data = train_data)
+summary(fitted.model)
+```
+
+To test H0: B1=0, we used z = 4.830 (p-value=1.36e-06). Hence, the length of credit use (log(credit_usage)) appeared to have a significant impact on the probability of classification creditability.
+
+Because we have transformed credit usage - log(Credit_usage), we needed to change the log back to non transformed normal number.
+```{r}
+exp(0.97711)
+```
+Therefore, the credit_usage has an estimated coefficient of 2.656767 it represented the change in the log(Odds) for every unit change in credit usage.
+
+#Logisic Regression equation: 
+Logit(P(credibility)) = -1.81698 + 2.656767*Credit_usage -1.47293*Checking_Acct_Balance(>=200) - 0.57974*Checking_Acct_Balance(0<=X<200) - 1.98029*Checking_Acct_Balance(no checking) -1.82508*Credit_history(critical/other existing credit)-1.14529*Credit_history(delayed previously) -1.03706*Credit_history(existing paid)-1.32353Purpose(used car) -1.01899*Avg_credit_balance(no known savings) -0.97352*Employment(4<=X<7) + 1.06300*Residence_since(2)
+
+The null deviance showed how well the response variable was predicted by a model which included only the intercept (grand mean) where as residual observed the inclusion of independent variables.
+Above, you can see the addition of 28 (599-571=28) independent variables decreased the deviance to 540.78 from 731.33, a significant reduction in deviance. Overall, the Residual Deviance was reduced by 190.55 with a loss of 28 degrees of freedom.
+
+Analysis of Deviance Table
+```{r}
+anova(fitted.model, test="Chisq")
+```
+
+
+#Residual Plot
+Let's plot residual to determine whether the residuals are consistent with random error.
+```{r}
+fit.model.res <- residuals(fitted.model, type = "deviance")
+```
+
+We now plot the deviance residuals.
+```{r}
+plot(fit.model.res, main="Plot of Deviance Residuals", ylab="Residuals")
+abline(0,0)
+```
+
+The deviance residuals plot shows a random pattern, indicating a good fit for a model.
+
+#Predicting Class/ Credibility
+Predicting classification of credibility using the test set.
+```{r}
+#for test data
+test_data$fit.pred <- predict(fitted.model, newdata=test_data, type="response")
+head(test_data$fit.pred)
+```
+
+#Cutoff Point
+Find apprpriate cutoff point of the model.
+```{r}
+fit.preds <- prediction(test_data$fit.pred, test_data$credibility)
+```
+
+```{r}
+fit.model.eval <- performance(fit.preds, "acc")
+plot(fit.model.eval)
+abline(h=0.77, v=0.649, col="red")
+```
+Identify the best values
+```{r}
+fit.max <- which.max(slot(fit.model.eval, "y.values")[[1]])
+fit.acc <- slot(fit.model.eval, "y.values")[[1]][fit.max]
+fit.cut <- slot(fit.model.eval, "x.values")[[1]][fit.max]
+print(c(Accuracy=fit.acc, Cutoff=fit.cut))
+```
+The model correctly predicts 77% of the cases on the cutoff point at 0.65
+
+#Plot the ROC curve and calculate the AUC
+```{r}
+fit.model.roc <- performance(fit.preds, "tpr","fpr")
+plot(fit.model.roc,
+     colorize=T,
+     main="ROC Curve",
+     ylab="Sensitivity",
+     xlab="1-Specificity")
+abline(a=0,b=1)
+
+#AUC
+auc <- performance(fit.preds,"auc")
+fit.model.auc <- unlist(slot(auc,"y.values"))
+fit.model.auc <- round(fit.model.auc,4)
+legend(0.6,0.5, fit.model.auc, title="AUC")
+```
+
+The AUC is 75.3%. It has moderate discriminating power.
+
+#Confusionmatrix - Sensitivity, and Specificity
+```{r}
+test_data$fit.predicted <- ifelse(test_data$fit.pred >= fit.cut,"1","0")
+confusionMatrix(test_data$credibility, test_data$fit.predicted, positive="1")
+```
+
+
+A probability 50% for classification of credibility.
+```{r}
+test_data$fit.predicted50 <- ifelse(test_data$fit.pred >= 0.5,"1","0")
+confusionMatrix(test_data$credibility, test_data$fit.predicted50, positive="1")
+```
+
+Therefore, the model perform better than 50% chance.
+
+```{r}
+fit.model.eval <- performance(fit.preds, "acc")
+plot(fit.model.eval)
+abline(h=0.74, v=0.50, col="blue")
+abline(h=0.77, v=0.649, col="red")
+```
+
+#Conclusion and suggestions
+Compare between model 2 - stepwise regression and model 3 - removed no effect variables from stepwise regression. Model 3 is a better model. It has higher in accuracy , sensitivity, and specificity. 
+
+Credit usage is one of the most important variables in determining credit worthiness then, additionally they could also look at the Checking account balance, purpose of the loan application. Average credit balance will also help to model the credit worthiness, employment, and the status of residence are quite importanct as well.
